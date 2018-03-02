@@ -1,0 +1,73 @@
+#!/bin/bash
+#
+# swift-build
+#
+# Replacement for 'swift build'.
+# This script creates an environment where we can inject additional
+# arguments into swiftc when it is called by SPM. These arguments
+# are used to make it possible to link plugins into Package.manifest.
+#
+# With this environment in place, what it basically does is:
+# - swift build # In the BuildSupport directory
+# - swift build # In the repository root
+#
+
+# Catch errors
+set -o nounset
+set -o errexit
+
+MODIFIED_SWIFT_DIR=".modified-swift"
+BUILD_SUPPORT_SWIFTC_ENV="${MODIFIED_SWIFT_DIR}/build-support-swiftc-env"
+
+########
+# generate_build_support_swiftc_env()
+# Creates a file where we write the additional flags for swiftc when
+# it tries to compile Package.manifest. This file is read by the
+# build-support-swiftc script, which executes swiftc with our
+# additional flags.
+generate_build_support_swiftc_env() {
+    echo "BUILD_SUPPORT_SWIFTC_FLAGS=\"$1\"" >${BUILD_SUPPORT_SWIFTC_ENV}
+}
+
+########
+# To makes this all work, we create a modified swift environment by
+# copying all swift tools from /usr/bin into a local directory and then
+# do the following:
+# - Move swiftc to its own directory
+# - In the original location put a link to our build-support-swiftc script
+# - Create links to /usr/lib, so that all swift tools can find what they need.
+if [[ ! -d ${MODIFIED_SWIFT_DIR} ]]; then
+    tmpdir=${MODIFIED_SWIFT_DIR}-tmp
+    rm -rf ${MODIFIED_SWIFT_DIR} ${tmpdir}
+    mkdir -p ${tmpdir}/usr/bin
+    mkdir -p ${tmpdir}/usr/org-swiftc/bin
+    ln -s /usr/lib ${tmpdir}/usr/lib
+    ln -s /usr/lib ${tmpdir}/usr/org-swiftc/lib
+    cp /usr/bin/swift* ${tmpdir}/usr/bin
+    mv ${tmpdir}/usr/bin/swiftc ${tmpdir}/usr/org-swiftc/bin
+    ln -s ${PWD}/build-support-swiftc ${tmpdir}/usr/bin/swiftc
+    sync
+    mv ${tmpdir} ${MODIFIED_SWIFT_DIR}
+fi
+
+########
+# Put our swift environment in front of the path
+export PATH=${PWD}/${MODIFIED_SWIFT_DIR}/usr/bin:${PATH}
+
+########
+# Build the BuildSupport package
+generate_build_support_swiftc_env ""
+cd BuildSupport
+swift build
+cd ..
+
+########
+# Build the main package
+build_support_swiftc_extra_args="-I ${PWD}/BuildSupport/.build/debug"
+build_support_libs=$( find ${PWD}/BuildSupport/.build/debug/ -name "lib*.so" )
+for build_support_lib in ${build_support_libs}; do
+    build_support_swiftc_extra_args+=" -l${build_support_lib}"
+done
+generate_build_support_swiftc_env "${build_support_swiftc_extra_args}"
+swift build
+

@@ -1,0 +1,30 @@
+#!/bin/bash
+#
+# build-support-swiftc
+#
+# This is a placeholder for swiftc. It will execute the real swiftc
+# with additional arguments to make it possible to link our plugins
+# into the root Package.swift and to import the PackageDescription
+# module from our plugins.
+#
+# This script is meant to be called by SPM.
+#
+
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+SWIFTC=${DIR}/../org-swiftc/bin/swiftc
+BUILD_SUPPORT_SWIFTC_ENV=${DIR}/../../build-support-swiftc-env
+
+if [[ "$@" = *"-lPackageDescription"* ]]; then
+    # We are compiling Package.manifest. Read additional flags from the
+    # environment script that was created by the 'swift-build' script.
+    source ${BUILD_SUPPORT_SWIFTC_ENV}
+    ${SWIFTC} --driver-mode=swift ${BUILD_SUPPORT_SWIFTC_FLAGS} "$@"
+elif [[ "$@" = *"-DSWIFT_PACKAGE"* ]]; then
+    # We are compiling a package. Make PackageDescription module
+    # available for if a plugin imports it.
+    ${SWIFTC} "$@" -I ${DIR}/../lib/swift/pm/4
+else
+    # Anything else, just run swiftc as we were called.
+    ${SWIFTC} "$@"
+fi
+
